@@ -12,7 +12,6 @@ Probabilistic Estimates — Answer budget risk questions using NORMDIST and NORM
 How to Use
 Open the tool: pert-cost-risk-analysis.html
 The tool loads with the DTP (Design–Test–Production) example from the course LBD exercise. You can modify the default values, add or remove tasks, and explore how changes in estimates affect the project cost risk profile.
-Reference
 
-Pinto, J.K. Project Management: Achieving Competitive Advantage, 4th Edition.
+Reference
 PMI. A Guide to the Project Management Body of Knowledge (PMBOK Guide).
