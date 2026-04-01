@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PERT for Cost Risk Analysis — MGMT 410</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: linear-gradient(180deg, #faf6f0 0%, #f0e9df 100%); min-height: 100vh; }
+  input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useCallback } = React;
+
+const INITIAL_TASKS = [
+  { name: "Design", o: 3, ml: 6, p: 9 },
+  { name: "Test", o: 2, ml: 3, p: 5 },
+  { name: "Production", o: 3, ml: 5, p: 9 },
+];
+
+function normalCDF(x, mean, stdDev) {
+  const z = (x - mean) / stdDev;
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989422804014327;
+  const prob = d * Math.exp((-z * z) / 2) * t *
+    (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.8212560 + t * 1.3302744))));
+  return z > 0 ? 1 - prob : prob;
+}
+
+function normalInv(p, mean, stdDev) {
+  function rationalApprox(t) {
+    const c = [2.515517, 0.802853, 0.010328];
+    const d = [1.432788, 0.189269, 0.001308];
+    return t - (c[0] + c[1]*t + c[2]*t*t) / (1 + d[0]*t + d[1]*t*t + d[2]*t*t*t);
+  }
+  if (p <= 0 || p >= 1) return mean;
+  let z;
+  if (p < 0.5) {
+    z = -rationalApprox(Math.sqrt(-2 * Math.log(p)));
+  } else {
+    z = rationalApprox(Math.sqrt(-2 * Math.log(1 - p)));
+  }
+  return mean + z * stdDev;
+}
+
+function NormalCurve({ mean, stdDev, width, height, highlight, highlightType, padding }) {
+  padding = padding || { top: 30, right: 30, bottom: 50, left: 60 };
+  const plotW = width - padding.left - padding.right;
+  const plotH = height - padding.top - padding.bottom;
+  const xMin = mean - 3.5 * stdDev;
+  const xMax = mean + 3.5 * stdDev;
+  const toX = (v) => padding.left + ((v - xMin) / (xMax - xMin)) * plotW;
+  const normalPDF = (x) =>
+    (1 / (stdDev * Math.sqrt(2 * Math.PI))) *
+    Math.exp(-0.5 * Math.pow((x - mean) / stdDev, 2));
+  const maxPDF = normalPDF(mean);
+  const toY = (pdf) => padding.top + plotH - (pdf / maxPDF) * plotH;
+  const steps = 200;
+  const points = [];
+  for (let i = 0; i <= steps; i++) {
+    const x = xMin + (i / steps) * (xMax - xMin);
+    points.push({ x, px: toX(x), py: toY(normalPDF(x)) });
+  }
+  const curvePath = "M " + points.map((p) => p.px + "," + p.py).join(" L ");
+
+  let shadePath = "";
+  if (highlight !== null && highlight !== undefined && highlightType === "left") {
+    const shadePoints = points.filter((p) => p.x <= highlight);
+    if (shadePoints.length > 1) {
+      shadePath = "M " + toX(xMin) + "," + (padding.top + plotH) + " " +
+        shadePoints.map((p) => "L " + p.px + "," + p.py).join(" ") +
+        " L " + toX(highlight) + "," + (padding.top + plotH) + " Z";
+    }
+  }
+
+  const tickCount = 7;
+  const tickStep = (xMax - xMin) / (tickCount - 1);
+  const ticks = [];
+  for (let i = 0; i < tickCount; i++) ticks.push(xMin + i * tickStep);
+
+  const prob = highlight !== null && highlightType === "left" ? normalCDF(highlight, mean, stdDev) : null;
+  const labelX = highlight !== null ? toX(Math.min(highlight, mean - 0.5 * stdDev)) : 0;
+
+  return React.createElement("svg", { viewBox: "0 0 " + width + " " + height, style: { width: "100%", maxWidth: width } },
+    ticks.map((v, i) => React.createElement("line", { key: "g" + i, x1: toX(v), y1: padding.top, x2: toX(v), y2: padding.top + plotH, stroke: "#e8e0d6", strokeWidth: 1, strokeDasharray: "4,4" })),
+    shadePath ? React.createElement("path", { d: shadePath, fill: "rgba(42,107,95,0.25)", stroke: "none" }) : null,
+    React.createElement("path", { d: curvePath, fill: "none", stroke: "#2a6b5f", strokeWidth: 2.5 }),
+    highlight !== null && highlight !== undefined ? React.createElement("g", null,
+      React.createElement("line", { x1: toX(highlight), y1: padding.top, x2: toX(highlight), y2: padding.top + plotH, stroke: "#d4782f", strokeWidth: 2, strokeDasharray: "6,4" }),
+      React.createElement("text", { x: toX(highlight), y: padding.top - 8, textAnchor: "middle", fill: "#d4782f", fontSize: 13, fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 600 }, "$" + highlight.toFixed(1) + "M")
+    ) : null,
+    React.createElement("line", { x1: toX(mean), y1: padding.top, x2: toX(mean), y2: padding.top + plotH, stroke: "#2a6b5f", strokeWidth: 1.5, strokeDasharray: "3,3", opacity: 0.5 }),
+    React.createElement("text", { x: toX(mean), y: padding.top + plotH + 38, textAnchor: "middle", fill: "#2a6b5f", fontSize: 11, fontFamily: "'Source Serif 4', Georgia, serif" }, "\u03BC = $" + mean.toFixed(2) + "M"),
+    React.createElement("line", { x1: padding.left, y1: padding.top + plotH, x2: padding.left + plotW, y2: padding.top + plotH, stroke: "#5c4a3a", strokeWidth: 1.5 }),
+    ticks.map((v, i) => React.createElement("g", { key: "t" + i },
+      React.createElement("line", { x1: toX(v), y1: padding.top + plotH, x2: toX(v), y2: padding.top + plotH + 6, stroke: "#5c4a3a", strokeWidth: 1 }),
+      React.createElement("text", { x: toX(v), y: padding.top + plotH + 22, textAnchor: "middle", fill: "#5c4a3a", fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }, v.toFixed(1))
+    )),
+    React.createElement("text", { x: padding.left + plotW / 2, y: height - 4, textAnchor: "middle", fill: "#5c4a3a", fontSize: 13, fontFamily: "'Source Serif 4', Georgia, serif" }, "Cost ($ million)"),
+    React.createElement("text", { x: 14, y: padding.top + plotH / 2, textAnchor: "middle", fill: "#5c4a3a", fontSize: 13, fontFamily: "'Source Serif 4', Georgia, serif", transform: "rotate(-90, 14, " + (padding.top + plotH / 2) + ")" }, "Probability"),
+    prob !== null ? React.createElement("text", { x: Math.max(padding.left + 40, labelX - 20), y: padding.top + plotH * 0.55, fill: "#2a6b5f", fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }, (prob * 100).toFixed(1) + "%") : null
+  );
+}
+
+function StepIndicator({ current, total }) {
+  const items = [];
+  for (let i = 0; i < total; i++) {
+    items.push(
+      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: "50%",
+          background: i <= current ? "#2a6b5f" : "#e8e0d6",
+          color: i <= current ? "#faf6f0" : "#8a7b6b",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 14, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+          transition: "all 0.3s ease",
+        }}>{i + 1}</div>
+        {i < total - 1 && <div style={{ width: 36, height: 2, background: i < current ? "#2a6b5f" : "#e8e0d6", transition: "all 0.3s ease" }} />}
+      </div>
+    );
+  }
+  return <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 24 }}>{items}</div>;
+}
+
+function App() {
+  const [tasks, setTasks] = useState(INITIAL_TASKS);
+  const [activeStep, setActiveStep] = useState(0);
+  const [budgetInput, setBudgetInput] = useState(14);
+  const [confidenceInput, setConfidenceInput] = useState(90);
+
+  const updateTask = useCallback((idx, field, value) => {
+    setTasks(prev => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: value === "" ? "" : Number(value) };
+      return next;
+    });
+  }, []);
+
+  const addTask = useCallback(() => {
+    setTasks(prev => [...prev, { name: "Task " + (prev.length + 1), o: 0, ml: 0, p: 0 }]);
+  }, []);
+
+  const removeTask = useCallback((idx) => {
+    setTasks(prev => prev.filter((_, i) => i !== idx));
+  }, []);
+
+  const calculations = useMemo(() => {
+    const taskStats = tasks.map(t => {
+      const o = Number(t.o) || 0, ml = Number(t.ml) || 0, p = Number(t.p) || 0;
+      return { mean: (o + 4 * ml + p) / 6, variance: Math.pow((p - o) / 6, 2) };
+    });
+    const totalMean = taskStats.reduce((s, t) => s + t.mean, 0);
+    const totalVariance = taskStats.reduce((s, t) => s + t.variance, 0);
+    const totalStdDev = Math.sqrt(totalVariance);
+    return { taskStats, totalMean, totalVariance, totalStdDev,
+      budgetProb: normalCDF(budgetInput, totalMean, totalStdDev),
+      confidenceCost: normalInv(confidenceInput / 100, totalMean, totalStdDev) };
+  }, [tasks, budgetInput, confidenceInput]);
+
+  const stepTitles = ["Three-Point Estimates", "PERT Formulas", "Sum of Random Variables", "Probabilistic Estimates"];
+  const stepDescriptions = [
+    "Enter the Optimistic (O), Most Likely (ML), and Pessimistic (P) cost estimates for each task. These represent the best-case, most probable, and worst-case costs.",
+    "The PERT formulas convert your three-point estimates into a mean (expected value) and variance (measure of uncertainty) for each task.",
+    "Since tasks are independent, the total project cost mean is the sum of individual means, and the total variance is the sum of individual variances.",
+    "With the project\u2019s mean and standard deviation, we can answer probabilistic questions using the normal distribution.",
+  ];
+
+  const inputStyle = { width: 70, padding: "8px 10px", border: "2px solid #d5cdc0", borderRadius: 8, fontSize: 15, textAlign: "center", fontFamily: "'JetBrains Mono', monospace", background: "#faf6f0", color: "#3d2e1f", outline: "none", transition: "border-color 0.2s" };
+  const btnBase = { padding: "10px 22px", borderRadius: 8, border: "none", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'Source Serif 4', Georgia, serif", transition: "all 0.2s" };
+
+  return (
+    <div style={{ minHeight: "100vh", fontFamily: "'Source Serif 4', Georgia, serif", color: "#3d2e1f" }}>
+      {/* Header */}
+      <div style={{ background: "#2a6b5f", padding: "32px 40px", color: "#faf6f0", position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: -40, right: -40, width: 200, height: 200, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
+        <div style={{ position: "absolute", bottom: -60, right: 100, width: 150, height: 150, borderRadius: "50%", background: "rgba(255,255,255,0.04)" }} />
+        <div style={{ fontSize: 12, letterSpacing: 3, textTransform: "uppercase", opacity: 0.7, marginBottom: 6, fontFamily: "'JetBrains Mono', monospace" }}>Learning By Doing</div>
+        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: -0.5 }}>PERT for Cost Risk Analysis</h1>
+        <p style={{ margin: "8px 0 0", fontSize: 15, opacity: 0.8, fontWeight: 300, maxWidth: 600 }}>Apply the four-step PERT technique to assess project cost uncertainty and make probabilistic budget decisions.</p>
+      </div>
+
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "32px 24px 60px" }}>
+        <StepIndicator current={activeStep} total={4} />
+        <div style={{ marginBottom: 20 }}>
+          <h2 style={{ margin: 0, fontSize: 22, color: "#2a6b5f", fontWeight: 700 }}>Step {activeStep + 1}: {stepTitles[activeStep]}</h2>
+          <p style={{ margin: "6px 0 0", fontSize: 15, color: "#6b5d50", lineHeight: 1.6 }}>{stepDescriptions[activeStep]}</p>
+        </div>
+
+        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e0d8cd", boxShadow: "0 2px 12px rgba(61,46,31,0.06)", padding: 28, marginBottom: 24 }}>
+
+          {/* STEP 1 */}
+          {activeStep === 0 && (
+            <div>
+              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" }}>
+                <thead>
+                  <tr style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: "#8a7b6b", textTransform: "uppercase", letterSpacing: 1 }}>
+                    <th style={{ textAlign: "left", padding: "0 8px", width: "30%" }}>Task</th>
+                    <th style={{ textAlign: "center", padding: "0 8px" }}>O (Optimistic)</th>
+                    <th style={{ textAlign: "center", padding: "0 8px" }}>ML (Most Likely)</th>
+                    <th style={{ textAlign: "center", padding: "0 8px" }}>P (Pessimistic)</th>
+                    <th style={{ width: 40 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tasks.map((t, i) => (
+                    <tr key={i}>
+                      <td style={{ padding: "0 8px" }}>
+                        <input value={t.name} onChange={e => updateTask(i, "name", e.target.value)}
+                          style={{ ...inputStyle, width: "100%", textAlign: "left", fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 600 }}
+                          onFocus={e => e.target.style.borderColor = "#2a6b5f"} onBlur={e => e.target.style.borderColor = "#d5cdc0"} />
+                      </td>
+                      {["o", "ml", "p"].map(f => (
+                        <td key={f} style={{ padding: "0 8px", textAlign: "center" }}>
+                          <input type="number" value={t[f]} onChange={e => updateTask(i, f, e.target.value)} style={inputStyle}
+                            onFocus={e => e.target.style.borderColor = "#2a6b5f"} onBlur={e => e.target.style.borderColor = "#d5cdc0"} />
+                        </td>
+                      ))}
+                      <td style={{ textAlign: "center" }}>
+                        {tasks.length > 1 && <button onClick={() => removeTask(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "#c0a080", fontSize: 18, fontWeight: 700, lineHeight: 1 }} title="Remove task">&times;</button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button onClick={addTask} style={{ ...btnBase, background: "#f0e9df", color: "#5c4a3a", marginTop: 8 }}>+ Add Task</button>
+              <div style={{ marginTop: 20, padding: "14px 18px", background: "#f7f3ec", borderRadius: 10, borderLeft: "4px solid #d4782f", fontSize: 14, color: "#6b5d50", lineHeight: 1.6 }}>
+                <strong style={{ color: "#d4782f" }}>Tip:</strong> Costs are in millions of dollars. The default values match the DTP (Design–Test–Production) example. Try changing them to see how estimates affect the analysis!
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2 */}
+          {activeStep === 1 && (
+            <div>
+              <div style={{ marginBottom: 16, padding: "14px 18px", background: "#f0f7f5", borderRadius: 10, border: "1px solid #c8e0d8" }}>
+                <div style={{ fontSize: 13, fontFamily: "'JetBrains Mono', monospace", color: "#2a6b5f", marginBottom: 4 }}>PERT Formulas</div>
+                <div style={{ fontSize: 15, lineHeight: 1.8 }}><strong>Mean</strong> = (O + 4&times;ML + P) / 6<br /><strong>Variance</strong> = [(P &minus; O) / 6]&sup2;</div>
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid #e0d8cd", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: "#8a7b6b", textTransform: "uppercase", letterSpacing: 1 }}>
+                    <th style={{ textAlign: "left", padding: "10px 12px" }}>Task</th>
+                    <th style={{ textAlign: "center", padding: "10px 12px" }}>O</th>
+                    <th style={{ textAlign: "center", padding: "10px 12px" }}>ML</th>
+                    <th style={{ textAlign: "center", padding: "10px 12px" }}>P</th>
+                    <th style={{ textAlign: "center", padding: "10px 12px", background: "#f0f7f5" }}>Mean</th>
+                    <th style={{ textAlign: "center", padding: "10px 12px", background: "#f0f7f5" }}>Variance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tasks.map((t, i) => {
+                    const s = calculations.taskStats[i];
+                    return (
+                      <tr key={i} style={{ borderBottom: "1px solid #ede7dd" }}>
+                        <td style={{ padding: "10px 12px", fontWeight: 600 }}>{t.name}</td>
+                        <td style={{ textAlign: "center", padding: "10px 12px", fontFamily: "'JetBrains Mono', monospace" }}>{Number(t.o)}</td>
+                        <td style={{ textAlign: "center", padding: "10px 12px", fontFamily: "'JetBrains Mono', monospace" }}>{Number(t.ml)}</td>
+                        <td style={{ textAlign: "center", padding: "10px 12px", fontFamily: "'JetBrains Mono', monospace" }}>{Number(t.p)}</td>
+                        <td style={{ textAlign: "center", padding: "10px 12px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#2a6b5f", background: "#f8fcfa" }}>{s.mean.toFixed(2)}</td>
+                        <td style={{ textAlign: "center", padding: "10px 12px", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#2a6b5f", background: "#f8fcfa" }}>{s.variance.toFixed(2)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div style={{ marginTop: 20, padding: "14px 18px", background: "#f7f3ec", borderRadius: 10, fontSize: 14, lineHeight: 1.8, fontFamily: "'JetBrains Mono', monospace", color: "#5c4a3a" }}>
+                <div style={{ fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 600, marginBottom: 4, color: "#3d2e1f" }}>Example: {tasks[0] && tasks[0].name}</div>
+                mean = ({Number(tasks[0] && tasks[0].o)} + 4&times;{Number(tasks[0] && tasks[0].ml)} + {Number(tasks[0] && tasks[0].p)}) / 6 = {calculations.taskStats[0] && calculations.taskStats[0].mean.toFixed(2)}<br />
+                var = [({Number(tasks[0] && tasks[0].p)} &minus; {Number(tasks[0] && tasks[0].o)}) / 6]&sup2; = {calculations.taskStats[0] && calculations.taskStats[0].variance.toFixed(2)}
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3 */}
+          {activeStep === 2 && (
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 24 }}>
+                {[
+                  { label: "Project Mean (\u03BC)", value: "$" + calculations.totalMean.toFixed(2) + "M", sub: "Sum of individual means" },
+                  { label: "Project Variance (\u03C3\u00B2)", value: calculations.totalVariance.toFixed(2), sub: "Sum of individual variances" },
+                  { label: "Std. Deviation (\u03C3)", value: "$" + calculations.totalStdDev.toFixed(2) + "M", sub: "\u221A Variance" },
+                ].map((card, i) => (
+                  <div key={i} style={{ background: i === 0 ? "#2a6b5f" : "#f8fcfa", color: i === 0 ? "#faf6f0" : "#3d2e1f", borderRadius: 12, padding: "20px 18px", border: i === 0 ? "none" : "1px solid #d5e8e0" }}>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1, opacity: 0.7, fontFamily: "'JetBrains Mono', monospace", marginBottom: 6 }}>{card.label}</div>
+                    <div style={{ fontSize: 26, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{card.value}</div>
+                    <div style={{ fontSize: 12, marginTop: 4, opacity: 0.6 }}>{card.sub}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: "16px 20px", background: "#f7f3ec", borderRadius: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 14, lineHeight: 2, color: "#5c4a3a" }}>
+                <div style={{ fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 600, color: "#3d2e1f", marginBottom: 4, fontSize: 15 }}>Computation</div>
+                &mu; = {calculations.taskStats.map(s => s.mean.toFixed(2)).join(" + ")} = <strong>${calculations.totalMean.toFixed(2)}M</strong><br />
+                &sigma;&sup2; = {calculations.taskStats.map(s => s.variance.toFixed(2)).join(" + ")} = <strong>{calculations.totalVariance.toFixed(2)}</strong><br />
+                &sigma; = &radic;{calculations.totalVariance.toFixed(2)} = <strong>${calculations.totalStdDev.toFixed(2)}M</strong>
+              </div>
+              <div style={{ marginTop: 16, padding: "14px 18px", background: "#f0f7f5", borderRadius: 10, borderLeft: "4px solid #2a6b5f", fontSize: 14, color: "#3d2e1f", lineHeight: 1.6 }}>
+                <strong>Key Assumption:</strong> The variance rule (&sigma;&sup2;<sub>total</sub> = &Sigma;&sigma;&sup2;<sub>i</sub>) holds only when tasks are <em>statistically independent</em> — one task's cost doesn't influence another's.
+              </div>
+            </div>
+          )}
+
+          {/* STEP 4 */}
+          {activeStep === 3 && (
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 }}>
+                <div style={{ border: "2px solid #e0d8cd", borderRadius: 12, padding: 20, background: "#fefcf9" }}>
+                  <div style={{ display: "inline-block", background: "#d4782f", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", marginBottom: 10 }}>QUESTION 1</div>
+                  <p style={{ fontSize: 14, margin: "0 0 12px", lineHeight: 1.5, color: "#5c4a3a" }}>What is the probability of completing within a given budget?</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 14 }}>Budget: $</span>
+                    <input type="number" value={budgetInput} step="0.5" onChange={e => setBudgetInput(Number(e.target.value))} style={{ ...inputStyle, width: 80 }}
+                      onFocus={e => e.target.style.borderColor = "#d4782f"} onBlur={e => e.target.style.borderColor = "#d5cdc0"} />
+                    <span style={{ fontSize: 14 }}>M</span>
+                  </div>
+                  <div style={{ marginTop: 14, padding: "12px 16px", borderRadius: 8, background: "#2a6b5f", color: "#faf6f0", fontFamily: "'JetBrains Mono', monospace", fontSize: 20, fontWeight: 700, textAlign: "center" }}>
+                    {(calculations.budgetProb * 100).toFixed(1)}%
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#8a7b6b", fontFamily: "'JetBrains Mono', monospace" }}>
+                    =NORMDIST({budgetInput}, {calculations.totalMean.toFixed(2)}, {calculations.totalStdDev.toFixed(2)}, 1)
+                  </div>
+                </div>
+                <div style={{ border: "2px solid #e0d8cd", borderRadius: 12, padding: 20, background: "#fefcf9" }}>
+                  <div style={{ display: "inline-block", background: "#5b6ea8", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 6, fontFamily: "'JetBrains Mono', monospace", marginBottom: 10 }}>QUESTION 2</div>
+                  <p style={{ fontSize: 14, margin: "0 0 12px", lineHeight: 1.5, color: "#5c4a3a" }}>What budget gives a desired confidence level?</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 14 }}>Confidence:</span>
+                    <input type="number" value={confidenceInput} min="1" max="99" step="5"
+                      onChange={e => setConfidenceInput(Math.min(99, Math.max(1, Number(e.target.value))))} style={{ ...inputStyle, width: 70 }}
+                      onFocus={e => e.target.style.borderColor = "#5b6ea8"} onBlur={e => e.target.style.borderColor = "#d5cdc0"} />
+                    <span style={{ fontSize: 14 }}>%</span>
+                  </div>
+                  <div style={{ marginTop: 14, padding: "12px 16px", borderRadius: 8, background: "#5b6ea8", color: "#faf6f0", fontFamily: "'JetBrains Mono', monospace", fontSize: 20, fontWeight: 700, textAlign: "center" }}>
+                    ${calculations.confidenceCost.toFixed(2)}M
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#8a7b6b", fontFamily: "'JetBrains Mono', monospace" }}>
+                    =NORMINV({(confidenceInput / 100).toFixed(2)}, {calculations.totalMean.toFixed(2)}, {calculations.totalStdDev.toFixed(2)})
+                  </div>
+                </div>
+              </div>
+              <div style={{ background: "#fefcf9", borderRadius: 12, border: "1px solid #e0d8cd", padding: "20px 16px 12px", textAlign: "center" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#5c4a3a", marginBottom: 8 }}>Total Project Cost — Risk Profile</div>
+                <NormalCurve mean={calculations.totalMean} stdDev={calculations.totalStdDev} width={680} height={300} highlight={budgetInput} highlightType="left" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Navigation */}
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <button onClick={() => setActiveStep(s => Math.max(0, s - 1))} disabled={activeStep === 0}
+            style={{ ...btnBase, background: activeStep === 0 ? "#e8e0d6" : "#fff", color: activeStep === 0 ? "#b0a090" : "#3d2e1f", border: "1px solid #d5cdc0", opacity: activeStep === 0 ? 0.5 : 1 }}>&larr; Previous</button>
+          <button onClick={() => setActiveStep(s => Math.min(3, s + 1))} disabled={activeStep === 3}
+            style={{ ...btnBase, background: activeStep === 3 ? "#e8e0d6" : "#2a6b5f", color: activeStep === 3 ? "#b0a090" : "#faf6f0", opacity: activeStep === 3 ? 0.5 : 1 }}>Next Step &rarr;</button>
+        </div>
+
+        <div style={{ marginTop: 40, textAlign: "center", fontSize: 12, color: "#b0a090", fontFamily: "'JetBrains Mono', monospace" }}>
+          MGMT 410 &middot; Project Management &middot; PERT Cost Risk Analysis
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
